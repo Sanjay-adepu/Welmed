@@ -53,13 +53,41 @@ const pdfSessions = {}; // Store parsed PDF text by sessionId
 const chatSessions = {};        
 /**        
 ✅ Classifies if the message is medical-related using OpenAI        
-*/        
-        
-        
-async function isMedicalQuery(messages) {        
-  const classificationPrompt = [        
-    {        
-      role: 'system',        
+*/       
+
+// Update the isMedicalQuery function
+async function isMedicalQuery(messages) {
+  // Check if the conversation includes a PDF upload
+  const hasPDFContext = messages.some(m => 
+    m.role === 'system' && m.content.includes('PDF:')
+  );
+
+  // If there's a PDF context, be more permissive with follow-ups
+  if (hasPDFContext) {
+    const lastUserMessage = messages.findLast(m => m.role === 'user');
+    if (lastUserMessage) {
+      // Allow any question that references the document content
+      const docReferenceKeywords = ['document', 'pdf', 'report', 'note', 'patient', 'page'];
+      const isAboutDocument = docReferenceKeywords.some(keyword => 
+        lastUserMessage.content.toLowerCase().includes(keyword)
+      );
+      
+      // Also allow questions that are clearly about medical content
+      const medicalKeywords = ['age', 'gender', 'symptom', 'diagnosis', 'treatment', 'medication'];
+      const isMedicalReference = medicalKeywords.some(keyword => 
+        lastUserMessage.content.toLowerCase().includes(keyword)
+      );
+      
+      if (isAboutDocument || isMedicalReference) {
+        return true;
+      }
+    }
+  }
+
+  // Original classification logic for non-PDF conversations
+  const classificationPrompt = [
+    {
+      role: 'system',
       content: `You are a strict binary classifier that determines if the latest user message — possibly a follow-up — is related to any medical topic, even if phrased indirectly.    
     
 Relevant medical topics include:    
@@ -94,28 +122,31 @@ Important:
 - Be generous in interpreting intent — users may phrase things differently but still mean the same.    
 - Consider the full conversation for context.    
 - If the latest message is related to medicine, health, body, symptoms, treatments, or follow-up to such — return "yes".    
-Respond only with one word: "yes" or "no" — no punctuation.`   },        
-    ...messages        
-  ];        
-        
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {        
-    method: 'POST',        
-    headers: {        
-      'Content-Type': 'application/json',        
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,        
-    },        
-    body: JSON.stringify({        
-      model: 'gpt-4o',        
-      messages: classificationPrompt,        
-      max_tokens: 1,        
-      temperature: 0,        
-    }),        
-  });        
-        
-  const data = await response.json();        
-  const classification = data.choices?.[0]?.message?.content?.trim().toLowerCase();        
-  return classification === 'yes';        
-}        
+Respond only with one word: "yes" or "no" — no punctuation.`
+    },
+    ...messages
+  ];
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o',
+      messages: classificationPrompt,
+      max_tokens: 1,
+      temperature: 0,
+    }),
+  });
+
+  const data = await response.json();
+  const classification = data.choices?.[0]?.message?.content?.trim().toLowerCase();
+  return classification === 'yes';
+}
+
+
           
 /**        
 ✅ Proxy endpoint for OpenAI API        
