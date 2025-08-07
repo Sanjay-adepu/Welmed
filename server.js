@@ -123,6 +123,8 @@ Respond only with one word: "yes" or "no" — no punctuation.`   },
 Filters non-medical requests using the classifier before forwarding    
 */    
 
+
+
 app.post('/api/chat', async (req, res) => {
   try {
     const {
@@ -150,8 +152,10 @@ app.post('/api/chat', async (req, res) => {
     const chatHistory = chatSessions[sessionId];
     const pdfText = pdfSessions[sessionId] || '';
 
-    // Inject PDF content into classifier context (for better context understanding)
+    // Prepare classifier messages
     const classifierMessages = [...chatHistory];
+
+    // ✅ Inject PDF context into classifier messages if not already present
     if (
       pdfText &&
       !classifierMessages.some(m => m.role === 'system' && m.content.includes('PDF:'))
@@ -162,7 +166,8 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    const allowed = await isMedicalQuery(classifierMessages);
+    // ✅ Classify with latest message included (fix for vague follow-ups)
+    const allowed = await isMedicalQuery([...classifierMessages, message]);
 
     if (!allowed) {
       const warning = {
@@ -173,7 +178,7 @@ app.post('/api/chat', async (req, res) => {
       return res.json({ choices: [{ message: warning }] });
     }
 
-    // Inject PDF into GPT messages (only once)
+    // ✅ Inject PDF content into main GPT context only once
     if (
       pdfText &&
       !chatHistory.some(m => m.role === 'system' && m.content.includes('PDF:'))
@@ -184,7 +189,7 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // Append user message
+    // ✅ Append the current user message to the chat
     chatHistory.push(message);
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
