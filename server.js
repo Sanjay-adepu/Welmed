@@ -60,42 +60,36 @@ async function isMedicalQuery(messages) {
   const classificationPrompt = [    
     {    
       role: 'system',    
-      content: `You are a strict binary classifier that determines if the latest user message — possibly a follow-up — is related to any medical topic, even if phrased indirectly.
+      content: `You are a strict binary classifier that determines whether the latest user message is related to any medical topic — including implied or indirect references — based on the full conversation history.
 
-Relevant medical topics include:
-Symptoms (e.g., fever, stomach pain, dizziness, fatigue, "not feeling well", "feeling sick")
+Medical topics include:
+- Symptoms (e.g., fever, stomach pain, dizziness, fatigue, “not feeling well”)
+- Diseases and conditions (e.g., diabetes, typhoid, asthma, cancer)
+- Medications or drugs (e.g., paracetamol, antibiotics, dosage, side effects)
+- Diagnosis or treatment (e.g., test results, prescriptions, therapy, reports)
+- Clinical procedures or scans (e.g., MRI, surgery, CT, biopsy, X-ray)
+- Insurance, billing, codes (e.g., CPT, ICD, reimbursements, pre-auths)
+- Healthcare services or logistics (e.g., OPD, appointments, telehealth)
+- Anatomy and body parts (e.g., heart, liver, joints, nerves)
+- Mental health (e.g., depression, anxiety, therapy)
+- Medical equipment or vitals (e.g., glucometer, BP monitor, oxygen levels)
 
-Diseases and conditions (e.g., diabetes, typhoid, asthma, cancer, infections, chronic illness)
+However, users often follow up without repeating medical words. You must:
+- Treat vague replies as medical if the previous message was medical
+- Consider indirect intent or emotional expressions (e.g., “Should I worry?” after a symptom)
+- Use full chat history for meaning, not just the current message
+- Be generous in interpreting common language that relates to health, wellness, or the body
 
-Medications or drugs (e.g., paracetamol, antibiotics, insulin, dosage, side effects, drug interactions)
+Examples:
+- “What should I do next?” (after “I have chest pain”) → yes  
+- “How long will it take?” (after mentioning antibiotics) → yes  
+- “Can I still work today?” (after a fever) → yes  
+- “Is it okay?” (after a lab report) → yes  
+- “What’s your name?” → no  
+- “What’s the weather?” → no  
 
-Medical coding (e.g., ICD, CPT, HCPCS, billing codes, modifiers, diagnosis codes)
-
-Diagnosis or treatment (e.g., test results, prescriptions, therapies, interpretation of lab reports)
-
-Healthcare services (e.g., consultation, OPD, emergency, telemedicine, appointments, hospital logistics)
-
-Insurance and billing (e.g., medical claims, reimbursements, coverage questions, preauthorization)
-
-Clinical procedures (e.g., MRI, surgery, X-ray, CT scan, biopsy, endoscopy)
-
-Body parts or human anatomy (e.g., heart, lungs, spine, liver, joints, nerves)
-
-Mental health (e.g., anxiety, depression, counseling, psychiatric care)
-
-Medical devices or equipment (e.g., pacemaker, glucometer, thermometer, wheelchair)
-
-Health vitals or measurements (e.g., blood pressure, oxygen saturation, glucose levels, heart rate)
-
-Messages may include direct medical terms or implied medical concerns (e.g., "I feel i", "My BP is high", "Can I see a doctor today?").
-
-Important:
-- Treat vague follow-ups as medical if the prior message was medical (e.g., "how long does it take to go away?" right after "I have a fever").
-- Be generous in interpreting intent — users may phrase things differently but still mean the same.
-- Consider the full conversation for context.
-- If the latest message is related to medicine, health, body, symptoms, treatments, or follow-up to such — return "yes".
-
-Respond only with one word: "yes" or "no" — no punctuation.`   },    
+Respond with one word only: **yes** or **no** (no punctuation).`
+   },    
     ...messages    
   ];    
     
