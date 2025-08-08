@@ -92,6 +92,9 @@ Health vitals or measurements (e.g., blood pressure, oxygen saturation, glucose 
 Messages may include direct medical terms or implied medical concerns (e.g., "I feel i", "My BP is high", "Can I see a doctor today?").    
     
 Important:    
+-If the user has uploaded a medical document and their latest message appears to reference it
+(e.g., asks about an "encounter", "diagnosis", "patient", "procedure", "finding", or other content 
+that could be in the document), treat it as medical even if it contains no explicit medical words.
 - Treat vague follow-ups as medical if the prior message was medical (e.g., "how long does it take to go away?" right after "I have a fever").    
 - Be generous in interpreting intent — users may phrase things differently but still mean the same.    
 - Consider the full conversation for context.    
@@ -124,9 +127,7 @@ Respond only with one word: "yes" or "no" — no punctuation.`   },
 Filters non-medical requests using the classifier before forwarding        
 */        
     
-    
-    
-    app.post('/api/chat', async (req, res) => {
+ app.post('/api/chat', async (req, res) => {
   try {
     const {
       sessionId,
@@ -155,17 +156,26 @@ Filters non-medical requests using the classifier before forwarding
 
     // ✅ Classifier always gets PDF snippet + history + latest message
     const classifierMessages = [
-  {
-    role: 'system',
-    content: `You are WellMed AI's medical relevance classifier.
-This is a summarized medical document provided by the user (retain all context from it when classifying):
-${pdfText || '[No PDF uploaded]'}`
-  },
-  ...chatHistory,
-  message
-];
+      {
+        role: 'system',
+        content: `You are WellMed AI's medical relevance classifier. 
+This is a summarized medical document provided by the user (retain all context from it when classifying): ${pdfText || '[No PDF uploaded]'}`
+      },
+      ...chatHistory,
+      message
+    ];
 
-    const allowed = await isMedicalQuery(classifierMessages);
+    let allowed = false;
+
+    // ✅ Auto-approve if PDF exists and user mentions case-related words
+    if (
+      pdfText &&
+      /\b(encounter|patient|diagnosis|procedure|finding|case|admission|discharge|history)\b/i.test(message.content)
+    ) {
+      allowed = true;
+    } else {
+      allowed = await isMedicalQuery(classifierMessages);
+    }
 
     if (!allowed) {
       const warning = {
@@ -178,13 +188,13 @@ ${pdfText || '[No PDF uploaded]'}`
 
     // ✅ Inject PDF content into GPT context only once
     if (
-  pdfText &&
-  !chatHistory.some(m => m.role === 'system' && m.content.includes('PDF:'))
-) {
-  chatHistory.splice(1, 0, {
-    role: 'system',
-    content: `📄 The user has uploaded a medical document (summarized):\n\n${pdfText}`
-  });
+      pdfText &&
+      !chatHistory.some(m => m.role === 'system' && m.content.includes('PDF:'))
+    ) {
+      chatHistory.splice(1, 0, {
+        role: 'system',
+        content: `📄 The user has uploaded a medical document (summarized):\n\n${pdfText}`
+      });
     }
 
     // ✅ Append the current user message
@@ -228,8 +238,9 @@ ${pdfText || '[No PDF uploaded]'}`
       details: error.message,
     });
   }
-});
+});   
     
+            
     
     
     
