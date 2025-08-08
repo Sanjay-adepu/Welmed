@@ -155,14 +155,15 @@ Filters non-medical requests using the classifier before forwarding
 
     // ✅ Classifier always gets PDF snippet + history + latest message
     const classifierMessages = [
-      {
-        role: 'system',
-        content: `You are WellMed AI's medical relevance classifier.
-PDF content (partial): ${pdfText ? pdfText.slice(0, 3500) : '[No PDF uploaded]'}`
-      },
-      ...chatHistory,
-      message
-    ];
+  {
+    role: 'system',
+    content: `You are WellMed AI's medical relevance classifier.
+This is a summarized medical document provided by the user (retain all context from it when classifying):
+${pdfText || '[No PDF uploaded]'}`
+  },
+  ...chatHistory,
+  message
+];
 
     const allowed = await isMedicalQuery(classifierMessages);
 
@@ -177,13 +178,13 @@ PDF content (partial): ${pdfText ? pdfText.slice(0, 3500) : '[No PDF uploaded]'}
 
     // ✅ Inject PDF content into GPT context only once
     if (
-      pdfText &&
-      !chatHistory.some(m => m.role === 'system' && m.content.includes('PDF:'))
-    ) {
-      chatHistory.splice(1, 0, {
-        role: 'system',
-        content: `📄 The user has uploaded a medical document. Here's the content:\n\n${pdfText.slice(0, 3000)}`
-      });
+  pdfText &&
+  !chatHistory.some(m => m.role === 'system' && m.content.includes('PDF:'))
+) {
+  chatHistory.splice(1, 0, {
+    role: 'system',
+    content: `📄 The user has uploaded a medical document (summarized):\n\n${pdfText}`
+  });
     }
 
     // ✅ Append the current user message
@@ -233,38 +234,59 @@ PDF content (partial): ${pdfText ? pdfText.slice(0, 3500) : '[No PDF uploaded]'}
     
     
 // ✅ PDF Analysis Endpoint    
-app.post('/api/analyze-pdf', upload.single('pdf'), async (req, res) => {    
-  try {    
-    const sessionId = req.body.sessionId; // Frontend must send this with PDF upload    
-    
-    if (!sessionId) {    
-      return res.status(400).json({ error: 'Missing sessionId in PDF upload' });    
-    }    
-    
-    if (!req.file) {    
-      return res.status(400).json({ error: 'No PDF file uploaded' });    
-    }    
-    
-    const pdfBuffer = req.file.buffer;    
-    const pdfData = await pdfParse(pdfBuffer); // ✅ parse first    
-    
-    pdfSessions[sessionId] = pdfData.text; // ✅ now safe to access    
-    
-    res.json({    
-      success: true,    
-      text: pdfData.text,    
-      pages: pdfData.numpages,    
-      info: pdfData.info,    
-    });    
-  } catch (error) {    
-    console.error('PDF Analysis Error:', error);    
-    res.status(500).json({    
-      error: 'PDF Analysis Error',    
-      details: error.message,    
-    });    
-  }    
-});    
-        
+app.post('/api/analyze-pdf', upload.single('pdf'), async (req, res) => {
+  try {
+    const sessionId = req.body.sessionId;
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing sessionId in PDF upload' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'No PDF file uploaded' });
+    }
+
+    const pdfBuffer = req.file.buffer;
+    const pdfData = await pdfParse(pdfBuffer);
+    const fullText = pdfData.text;
+
+    // ✅ Summarize with OpenAI
+    const summaryResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are a medical document summarizer. Produce a concise, clear summary that preserves all medical details useful for coding and healthcare support.' },
+          { role: 'user', content: fullText }
+        ],
+        max_tokens: 2000,
+        temperature: 0.3
+      }),
+    });
+
+    const summaryData = await summaryResponse.json();
+    const summary = summaryData.choices?.[0]?.message?.content || fullText.slice(0, 3000);
+
+    // ✅ Store only the summary for follow-ups
+    pdfSessions[sessionId] = summary;
+
+    res.json({
+      success: true,
+      summary,
+      pages: pdfData.numpages,
+      info: pdfData.info,
+    });
+
+  } catch (error) {
+    console.error('PDF Analysis Error:', error);
+    res.status(500).json({
+      error: 'PDF Analysis Error',
+      details: error.message,
+    });
+  }
+});
         
 /**        
 ✅ Health check endpoint        
