@@ -61,7 +61,13 @@ async function isMedicalQuery(messages) {
   const hasPDFContext = messages.some(m => 
     m.role === 'system' && m.content.includes('PDF:')
   );
+const content = lastUserMessage?.content?.toLowerCase() || '';
 
+  // ❌ Explicitly block common non-medical tech terms
+  const nonMedicalBlocklist = ['python', 'javascript', 'java', 'react', 'html', 'css', 'node.js', 'programming', 'coding', 'developer'];
+  if (nonMedicalBlocklist.some(term => content === term || content.includes(term + ' '))) {
+    return false; // instantly reject without GPT call
+}
   // If there's a PDF context, be more permissive with follow-ups
   if (hasPDFContext) {
     const lastUserMessage = messages.findLast(m => m.role === 'user');
