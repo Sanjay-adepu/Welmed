@@ -89,12 +89,16 @@ Health vitals or measurements (e.g., blood pressure, oxygen saturation, glucose 
     
 Messages may include direct medical terms or implied medical concerns (e.g., "I feel i", "My BP is high", "Can I see a doctor today?").    
     
+
+Ignore any message that contains programming or technology-related keywords, even if medical words are present. Examples of tech terms to ignore:
+python, java, javascript, c++, c#, react, node.js, sql, html, css, api, ai model names (gpt, bert, llama), software, app, code, script, programming, algorithm, machine learning, data science.
+
 Important:    
-- Treat vague follow-ups as medical if the prior message was medical (e.g., "how long does it take to go away?" right after "I have a fever").    
+- Treat vague follow-ups as medical if the prior message was medical and does not contain any tech/programming keywords.    
 - Be generous in interpreting intent — users may phrase things differently but still mean the same.    
 - Consider the full conversation for context.    
-- If the latest message is related to medicine, health, body, symptoms, treatments, or follow-up to such — return "yes".    
-Respond only with one word: "yes" or "no" — no punctuation.`   },        
+- If the latest message is related to medicine, health, body, symptoms, treatments, or follow-up to such — and does NOT contain tech/programming keywords — return "yes".    
+- Otherwise return "no".`   },        
     ...messages        
   ];        
         
