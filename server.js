@@ -1,322 +1,163 @@
 
-
-const express = require('express');        
-const cors = require('cors');        
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));        
-require('dotenv').config();      
-const path = require('path');    
-const multer = require('multer');    
-const pdfParse = require('pdf-parse');    
-        
-const app = express();        
-const PORT = process.env.PORT || 5000;        
-        
-// ✅ CORS: allow frontend hosted on Vercel        
-const allowedOrigins = [        
-  'https://www.wellmedai.com',        
-  'http://localhost:5173'        
-];        
-    
-// Multer config for PDF uploads    
-const upload = multer({    
-  storage: multer.memoryStorage(),    
-  limits: {    
-    fileSize: 10 * 1024 * 1024, // 10MB    
-  },    
-  fileFilter: (req, file, cb) => {    
-    if (file.mimetype === 'application/pdf') {    
-      cb(null, true);    
-    } else {    
-      cb(new Error('Only PDF files are allowed'), false);    
-    }    
-  },    
-});    
-    
-    
-    
-    
-app.use(cors({        
-  origin: function (origin, callback) {        
-    // Allow requests with no origin (e.g. curl or mobile apps)        
-    if (!origin || allowedOrigins.includes(origin)) {        
-      callback(null, true);        
-    } else {        
-      callback(new Error('Not allowed by CORS'));        
-    }        
-  },        
-  credentials: true        
-}));        
-        
-app.use(express.json());      
-    
-    
-const pdfSessions = {}; // Store parsed PDF text by sessionId    
-// ✅ In-memory session storage        
-const chatSessions = {};        
-/**        
-✅ Classifies if the message is medical-related using OpenAI        
-*/        
-        
-        
-async function isMedicalQuery(messages) {        
-  const classificationPrompt = [        
-    {        
-      role: 'system',        
-      content: `You are a strict binary classifier that determines if the latest user message — possibly a follow-up — is related to any medical topic, even if phrased indirectly.    
-    
-Relevant medical topics include:    
-Symptoms (e.g., fever, stomach pain, dizziness, fatigue, "not feeling well", "feeling sick")    
-    
-Diseases and conditions (e.g., diabetes, typhoid, asthma, cancer, infections, chronic illness)    
-    
-Medications or drugs (e.g., paracetamol, antibiotics, insulin, dosage, side effects, drug interactions)    
-    
-Medical coding (e.g., ICD, CPT, HCPCS, billing codes, modifiers, diagnosis codes)    
-    
-Diagnosis or treatment (e.g., test results, prescriptions, therapies, interpretation of lab reports)    
-    
-Healthcare services (e.g., consultation, OPD, emergency, telemedicine, appointments, hospital logistics)    
-    
-Insurance and billing (e.g., medical claims, reimbursements, coverage questions, preauthorization)    
-    
-Clinical procedures (e.g., MRI, surgery, X-ray, CT scan, biopsy, endoscopy)    
-    
-Body parts or human anatomy (e.g., heart, lungs, spine, liver, joints, nerves)    
-    
-Mental health (e.g., anxiety, depression, counseling, psychiatric care)    
-    
-Medical devices or equipment (e.g., pacemaker, glucometer, thermometer, wheelchair)    
-    
-Health vitals or measurements (e.g., blood pressure, oxygen saturation, glucose levels, heart rate)    
-    
-Messages may include direct medical terms or implied medical concerns (e.g., "I feel i", "My BP is high", "Can I see a doctor today?").    
-    
-Important:    
--If the user has uploaded a medical document and their latest message appears to reference it
-(e.g., asks about an "encounter", "diagnosis", "patient", "procedure", "finding", or other content 
-that could be in the document), treat it as medical even if it contains no explicit medical words.
-- Treat vague follow-ups as medical if the prior message was medical (e.g., "how long does it take to go away?" right after "I have a fever").    
-- Be generous in interpreting intent — users may phrase things differently but still mean the same.    
-- Consider the full conversation for context.    
-- If the latest message is related to medicine, health, body, symptoms, treatments, or follow-up to such — return "yes".    
-Respond only with one word: "yes" or "no" — no punctuation.`   },        
-    ...messages        
-  ];        
-        
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {        
-    method: 'POST',        
-    headers: {        
-      'Content-Type': 'application/json',        
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,        
-    },        
-    body: JSON.stringify({        
-      model: 'gpt-4o',        
-      messages: classificationPrompt,        
-      max_tokens: 1,        
-      temperature: 0,        
-    }),        
-  });        
-        
-  const data = await response.json();        
-  const classification = data.choices?.[0]?.message?.content?.trim().toLowerCase();        
-  return classification === 'yes';        
-}        
           
-/**        
-✅ Proxy endpoint for OpenAI API        
-Filters non-medical requests using the classifier before forwarding        
-*/        
-    
- app.post('/api/chat', async (req, res) => {
+const express = require('express');
+const cors = require('cors');
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const path = require('path');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Gemini API key (direct usage, no env file)
+const GEMINI_API_KEY = "AIzaSyBTQfMY_Vpdin_5DWTbw12zOGg2bzFwQdE";
+
+// Multer config for PDF uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only PDF files are allowed'), false);
+  },
+});
+
+// CORS config
+app.use(cors({
+  origin: 'https://www.wellmedai.com',
+  credentials: true,
+}));
+
+app.use(express.json());
+
+// ✅ PDF Analysis Endpoint
+app.post('/api/analyze-pdf', upload.single('pdf'), async (req, res) => {
   try {
-    const {
-      sessionId,
-      message, // { role: 'user', content: '...' }
-      model = 'gpt-4o',
-      max_tokens = 20000,
-      temperature = 0.7,
-    } = req.body;
+    if (!req.file) return res.status(400).json({ error: 'No PDF file uploaded' });
 
-    if (!sessionId || !message || message.role !== 'user') {
-      return res.status(400).json({ error: 'Missing or invalid sessionId or message' });
-    }
+    const pdfBuffer = req.file.buffer;
+    const pdfData = await pdfParse(pdfBuffer);
 
-    // Initialize session if not exists
-    if (!chatSessions[sessionId]) {
-      chatSessions[sessionId] = [
-        {
-          role: 'system',
-          content: 'You are WellMed AI, a helpful assistant specialized in medical coding and healthcare support.'
-        }
-      ];
-    }
+    res.json({
+      success: true,
+      text: pdfData.text,
+      pages: pdfData.numpages,
+      info: pdfData.info,
+    });
+  } catch (error) {
+    console.error('PDF Analysis Error:', error);
+    res.status(500).json({ error: 'PDF Analysis Error', details: error.message });
+  }
+});
 
-    const chatHistory = chatSessions[sessionId];
-    const pdfText = pdfSessions[sessionId] || '';
+// ✅ Chat Endpoint (Gemini)
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { messages } = req.body;
 
-    // ✅ Classifier always gets PDF snippet + history + latest message
-    const classifierMessages = [
-      {
-        role: 'system',
-        content: `You are WellMed AI's medical relevance classifier. 
-This is a summarized medical document provided by the user (retain all context from it when classifying): ${pdfText || '[No PDF uploaded]'}`
-      },
-      ...chatHistory,
-      message
-    ];
+    // Convert messages into Gemini format
+    const geminiMessages = messages.map(m => ({
+      role: m.role,
+      parts: [{ text: m.content }]
+    }));
 
-    let allowed = false;
+    // Inject system prompt
+    geminiMessages.unshift({
+      role: "system",
+      parts: [{
+        text: "You are Wellmed AI, a helpful assistant developed by Chakri. You specialize in medical coding and related topics. Do not mention OpenAI, GPT, ChatGPT, or your origins. Always stay in character as Wellmed AI."
+      }]
+    });
 
-    // ✅ Auto-approve if PDF exists and user mentions case-related words
-    if (
-      pdfText &&
-      /\b(encounter|patient|diagnosis|procedure|finding|case|admission|discharge|history)\b/i.test(message.content)
-    ) {
-      allowed = true;
-    } else {
-      allowed = await isMedicalQuery(classifierMessages);
-    }
-
-    if (!allowed) {
-      const warning = {
-        role: 'assistant',
-        content: "❌ Sorry, WellMed AI is strictly a medical coding and healthcare assistant. We can't respond to unrelated topics.",
-      };
-      chatHistory.push(message, warning);
-      return res.json({ choices: [{ message: warning }] });
-    }
-
-    // ✅ Inject PDF content into GPT context only once
-    if (
-      pdfText &&
-      !chatHistory.some(m => m.role === 'system' && m.content.includes('PDF:'))
-    ) {
-      chatHistory.splice(1, 0, {
-        role: 'system',
-        content: `📄 The user has uploaded a medical document (summarized):\n\n${pdfText}`
-      });
-    }
-
-    // ✅ Append the current user message
-    chatHistory.push(message);
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "X-goog-api-key": GEMINI_API_KEY
       },
       body: JSON.stringify({
-        model,
-        messages: chatHistory,
-        max_tokens,
-        temperature,
-      }),
+        contents: geminiMessages
+      })
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      console.error('OpenAI API Error:', data);
-      return res.status(response.status).json({
-        error: 'OpenAI API Error',
-        details: data.error?.message || 'Unknown error',
-      });
-    }
-
-    const assistantReply = data.choices?.[0]?.message;
-    if (assistantReply) {
-      chatHistory.push(assistantReply);
+      console.error("Gemini API Error:", data);
+      return res.status(response.status).json({ error: "Gemini API Error", details: data.error?.message || "Unknown error" });
     }
 
     res.json(data);
-
   } catch (error) {
-    console.error('Server Error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      details: error.message,
-    });
-  }
-});   
-    
-            
-    
-    
-    
-// ✅ PDF Analysis Endpoint    
-app.post('/api/analyze-pdf', upload.single('pdf'), async (req, res) => {
-  try {
-    const sessionId = req.body.sessionId;
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Missing sessionId in PDF upload' });
-    }
-    if (!req.file) {
-      return res.status(400).json({ error: 'No PDF file uploaded' });
-    }
-
-    const pdfBuffer = req.file.buffer;
-    const pdfData = await pdfParse(pdfBuffer);
-    const fullText = pdfData.text;
-
-    // ✅ Summarize with OpenAI
-    const summaryResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a medical document summarizer. Produce a concise, clear summary that preserves all medical details useful for coding and healthcare support.' },
-          { role: 'user', content: fullText }
-        ],
-        max_tokens: 2000,
-        temperature: 0.3
-      }),
-    });
-
-    const summaryData = await summaryResponse.json();
-    const summary = summaryData.choices?.[0]?.message?.content || fullText.slice(0, 3000);
-
-    // ✅ Store only the summary for follow-ups
-    pdfSessions[sessionId] = summary;
-
-    res.json({
-      success: true,
-      summary,
-      pages: pdfData.numpages,
-      info: pdfData.info,
-    });
-
-  } catch (error) {
-    console.error('PDF Analysis Error:', error);
-    res.status(500).json({
-      error: 'PDF Analysis Error',
-      details: error.message,
-    });
+    console.error("Server Error:", error);
+    res.status(500).json({ error: "Internal Server Error", details: error.message });
   }
 });
-        
-/**        
-✅ Health check endpoint        
-*/        
-app.get('/api/health', (req, res) => {        
-  res.json({        
-    status: 'OK',        
-    message: 'Server is running',        
-    environment: process.env.NODE_ENV || 'development',        
-  });        
-});        
-        
-// ✅ Start the server        
-app.listen(PORT, () => {        
-  console.log(`✅ Server running on port ${PORT}`);        
-  console.log(`🌐 CORS allowed from: ${allowedOrigins.join(', ')}`);        
-  console.log(`🔍 Health check: http://localhost:${PORT}/api/health`);        
-});        
-        
-module.exports = app;      
 
-          
+// ✅ Chat with PDF Context
+app.post('/api/chat1', async (req, res) => {
+  try {
+    const { messages, pdfContent } = req.body;
+
+    const geminiMessages = messages.map(m => ({
+      role: m.role,
+      parts: [{ text: m.content }]
+    }));
+
+    // System prompt
+    const systemPrompt = {
+      role: "system",
+      parts: [{
+        text: "You are Wellmed AI, a helpful assistant developed by Chakri. You specialize in medical coding and related topics. Do not mention OpenAI, GPT, ChatGPT, or your origins."
+      }]
+    };
+
+    // Context injection
+    const contextPrompt = pdfContent
+      ? { role: "system", parts: [{ text: `The user has provided the following PDF content for reference:\n${pdfContent}` }] }
+      : null;
+
+    const finalMessages = contextPrompt
+      ? [systemPrompt, contextPrompt, ...geminiMessages]
+      : [systemPrompt, ...geminiMessages];
+
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-goog-api-key": GEMINI_API_KEY
+      },
+      body: JSON.stringify({
+        contents: finalMessages
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Gemini API Error:", data);
+      return res.status(response.status).json({ error: "Gemini API Error", details: data.error?.message || "Unknown error" });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error("Server Error:", error);
+    res.status(500).json({ error: "Internal Server Error", details: error.message });
+  }
+});
+
+// ✅ Health Check Endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Server is running', environment: process.env.NODE_ENV || 'development' });
+});
+
+// ✅ Start Server
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌐 CORS allowed from: https://www.wellmedai.com`);
+  console.log(`🔍 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`📄 PDF Analysis endpoint: http://localhost:${PORT}/api/analyze-pdf`);
+});
+
+module.exports = app;
