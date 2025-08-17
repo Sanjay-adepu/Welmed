@@ -28,6 +28,7 @@ const upload = multer({
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'https://www.wellmedai.com',
+  'https://el-front-umber.vercel.app'
 ];
 app.use(cors({
   origin: (origin, cb) => {
