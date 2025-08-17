@@ -25,7 +25,7 @@ const upload = multer({
 
 // CORS config
 app.use(cors({
-  origin: 'https://www.wellmedai.com',
+  origin: 'http://localhost:5173',
   credentials: true,
 }));
 
