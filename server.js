@@ -26,7 +26,7 @@ const upload = multer({
 
 // -------- CORS config --------
 const ALLOWED_ORIGINS = [
-  'http://localhost:5173',
+  'https://vektor-bice.vercel.app',
   'https://www.wellmedai.com',
   'https://el-front-umber.vercel.app'
 ];
